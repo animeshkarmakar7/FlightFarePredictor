@@ -1,0 +1,8 @@
+# requirements.txt
+pandas
+numpy
+scikit-learn
+xgboost
+matplotlib
+jupyter
+python-dotenv
