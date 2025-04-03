@@ -2,33 +2,44 @@ import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
-import { Plane, Users, Calendar, Clock, MapPin } from 'lucide-react';
-import AirportAutocomplete from "../AirportAutocomplete/AirportAutocomplete";
-import { predictFlightFare } from '../../services/api';
+import { Plane, Users, Calendar, Clock, MapPin, TrendingUp } from 'lucide-react';
+import { predictFlightFare, predictFlightTrend } from '../../services/api';
 import toast, { Toaster } from "react-hot-toast";
+import { Line } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
 
-// Mapping from human-readable time to numeric values
-const TIME_MAPPING = {
-  'Early_Morning': 0,
-  'Morning': 8,
-  'Afternoon': 12,
-  'Evening': 14,
-  'Night': 18,
-  'Late_Night': 22
-};
+// Register ChartJS components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend
+);
 
-// Mapping for cities (if your autocomplete returns a full name, you can convert if needed)
-const CITY_MAPPING = {
-  "CHHATRAPATI S MAHARAJ": "Mumbai",
-  "SUBHAS CHANDRA BOSE": "Kolkata",
-  "INDIRA GANDHI INTL": "Delhi",
-  "Kempegowda International": "Bangalore",
-  "Rajiv Gandhi International": "Hyderabad",
-  "Chennai International": "Chennai"
-};
+// Define all available cities
+const ALL_CITIES = ['Mumbai', 'Kolkata', 'Delhi', 'Bangalore', 'Hyderabad', 'Chennai'];
 
 // Define the order of cities expected by the backend
-const ALL_CITIES = ['Bangalore', 'Chennai', 'Delhi', 'Hyderabad', 'Kolkata', 'Mumbai'];
+const BACKEND_CITY_MAPPING = {
+  'Bangalore': 'Bangalore',
+  'Chennai': 'Chennai',
+  'Delhi': 'Delhi',
+  'Hyderabad': 'Hyderabad',
+  'Kolkata': 'Kolkata',
+  'Mumbai': 'Mumbai'
+};
 
 // Make sure the order matches the backend FEATURE_ORDER for airlines
 const ALL_AIRLINES = ["AirAsia", "Air_India", "GO_FIRST", "Indigo", "SpiceJet", "Vistara"];
@@ -37,80 +48,209 @@ const ALL_AIRLINES = ["AirAsia", "Air_India", "GO_FIRST", "Indigo", "SpiceJet", 
 const ALL_CLASSES = ['Business', 'Economy'];
 
 // For stops, our backend expects: stops_one, stops_two_or_more, stops_zero.
-// We map select values "0", "1", "2+" to these keys.
 const STOPS_MAPPING = {
   "0": "zero",
   "1": "one",
   "2+": "two_or_more"
 };
-const ALL_STOPS = ['one', 'two_or_more', 'zero'];
 
 export default function FlightFarePrediction() {
   const [result, setResult] = useState(null);
+  const [trendData, setTrendData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isTrendLoading, setIsTrendLoading] = useState(false);
   const [error, setError] = useState(null);
   
-  const { register, handleSubmit, watch, setValue } = useForm({
+  const { register, handleSubmit, watch, setValue, getValues } = useForm({
     defaultValues: {
       tripType: "oneWay",
-      source_city: "",
-      destination_city: "",
+      source_city: "Mumbai",
+      destination_city: "Delhi",
       departureDate: new Date(),
       airline: "SpiceJet",
-      stops: "0", // "0" for Non-stop, "1" for 1 Stop, "2+" for 2+ Stops
+      stops: "0",
       travelClass: "Economy",
-      departureTime: "Morning",
-      arrivalTime: "Evening",
+      departureHour: "09",
+      departureMinute: "00",
+      departureAmPm: "AM",
+      arrivalHour: "11",
+      arrivalMinute: "00",
+      arrivalAmPm: "AM",
       duration: 2
     },
   });
 
+  // Watch for changes in departure time and duration to update arrival time
+  const watchDepartureHour = watch("departureHour");
+  const watchDepartureMinute = watch("departureMinute");
+  const watchDepartureAmPm = watch("departureAmPm");
+  const watchDuration = watch("duration");
+
+  // Calculate arrival time based on departure time and duration
+  const calculateArrivalTime = () => {
+    const dHour = parseInt(watchDepartureHour);
+    const dMinute = parseInt(watchDepartureMinute);
+    const dAmPm = watchDepartureAmPm;
+    const duration = parseFloat(watchDuration);
+
+    // Convert to 24-hour format
+    let hour24 = dAmPm === "PM" && dHour !== 12 ? dHour + 12 : dHour;
+    if (dAmPm === "AM" && dHour === 12) hour24 = 0;
+
+    // Calculate total minutes
+    const totalMinutes = hour24 * 60 + dMinute + duration * 60;
+    
+    // Convert back to hours and minutes
+    let newHour = Math.floor(totalMinutes / 60) % 24;
+    const newMinute = Math.floor(totalMinutes % 60);
+    
+    // Convert to 12-hour format
+    const newAmPm = newHour >= 12 ? "PM" : "AM";
+    newHour = newHour % 12;
+    if (newHour === 0) newHour = 12;
+
+    // Format the time values
+    const formattedHour = newHour.toString().padStart(2, '0');
+    const formattedMinute = newMinute.toString().padStart(2, '0');
+
+    // Update the form values
+    setValue("arrivalHour", formattedHour);
+    setValue("arrivalMinute", formattedMinute);
+    setValue("arrivalAmPm", newAmPm);
+  };
+
+  // Watch for changes that affect arrival time
+  React.useEffect(() => {
+    if (watchDepartureHour && watchDepartureMinute && watchDepartureAmPm && watchDuration) {
+      calculateArrivalTime();
+    }
+  }, [watchDepartureHour, watchDepartureMinute, watchDepartureAmPm, watchDuration]);
+
   const onSubmit = async (data) => {
     try {
       setIsLoading(true);
+      setIsTrendLoading(true);
       setError(null);
-      setResult(null); // Reset previous result
+      setResult(null);
+      setTrendData(null);
       
-      console.log("Form data submitted:", data);
-      
-      // Normalize city names using CITY_MAPPING if available
-      const sourceCity = CITY_MAPPING[data.source_city] || data.source_city;
-      const destCity = CITY_MAPPING[data.destination_city] || data.destination_city;
-
       // Calculate days left (ensure a minimum of 1)
       const daysLeft = Math.ceil((data.departureDate - new Date()) / (1000 * 60 * 60 * 24));
       
-      // Build the payload's core numeric fields
+      // Format departure and arrival times
+      const departureTime = `${data.departureHour}:${data.departureMinute} ${data.departureAmPm}`;
+      const arrivalTime = `${data.arrivalHour}:${data.arrivalMinute} ${data.arrivalAmPm}`;
+      
+      // Map time to the categories that the backend expects
+      const mapTimeToCategory = (timeStr) => {
+        const [hours, minutes, ampm] = timeStr.split(/[: ]/);
+        let hour = parseInt(hours);
+        if (ampm === "PM" && hour !== 12) hour += 12;
+        if (ampm === "AM" && hour === 12) hour = 0;
+        
+        // Map to categories
+        if (hour >= 0 && hour < 6) return "Early_Morning";
+        if (hour >= 6 && hour < 12) return "Morning";
+        if (hour >= 12 && hour < 16) return "Afternoon";
+        if (hour >= 16 && hour < 19) return "Evening";
+        if (hour >= 19 && hour < 22) return "Night";
+        return "Late_Night";
+      };
+      
+      // Build the payload
       const payload = {
         days_left: daysLeft > 0 ? daysLeft : 1,
         duration: parseFloat(data.duration),
-        departureTime: data.departureTime,       // Pass the original time string
-        arrivalTime: data.arrivalTime,           // Pass the original time string
-        source_city: sourceCity,
-        destination_city: destCity,
+        departureTime: mapTimeToCategory(departureTime),
+        arrivalTime: mapTimeToCategory(arrivalTime),
+        source_city: BACKEND_CITY_MAPPING[data.source_city],
+        destination_city: BACKEND_CITY_MAPPING[data.destination_city],
         airline: data.airline,
         travelClass: data.travelClass,
         stops: data.stops,
-        departureDate: data.departureDate        // Also include the date
+        departureDate: data.departureDate,
       };
 
-      console.log("Sending to API service:", payload);
-      const prediction = await predictFlightFare(payload);
+      // Get both prediction and trend data
+      const [prediction, trendResponse] = await Promise.all([
+        predictFlightFare(payload),
+        predictFlightTrend(payload)
+      ]);
       
       if (prediction.status === "success") {
-        setResult(`${prediction.currency}${prediction.price.toLocaleString()}`);
+        setResult({
+          price: prediction.price,
+          currency: prediction.currency,
+          route: `${data.source_city} to ${data.destination_city}`,
+          date: data.departureDate.toLocaleDateString(),
+          time: `${departureTime} - ${arrivalTime}`,
+          airline: data.airline.replace(/_/g, ' '),
+          duration: data.duration,
+          class: data.travelClass,
+          stops: data.stops === "0" ? "Non-stop" : data.stops === "1" ? "1 Stop" : "2+ Stops"
+        });
       } else {
         setError("Prediction error: " + (prediction.error || "Unknown error"));
+      }
+
+      if (trendResponse.status === "success") {
+        setTrendData(trendResponse);
       }
     } catch (error) {
       console.error("Prediction failed:", error);
       setError("Prediction failed: " + error.message);
     } finally {
       setIsLoading(false);
+      setIsTrendLoading(false);
     }
   };
 
+  // Prepare chart data for visualization
+  const prepareChartData = () => {
+    if (!trendData) return null;
+
+    const historicalDates = trendData.historical.map(item => item.date);
+    const forecastDates = trendData.forecast.map(item => item.date);
+    
+    const historicalPrices = trendData.historical.map(item => item.price);
+    const forecastPrices = trendData.forecast.map(item => item.price);
+
+    return {
+      labels: [...historicalDates, ...forecastDates],
+      datasets: [
+        {
+          label: 'Flight Price (₹)',
+          data: [...historicalPrices, ...forecastPrices],
+          borderColor: 'rgb(59, 130, 246)',
+          backgroundColor: 'rgba(59, 130, 246, 0.5)',
+          tension: 0.1,
+          borderWidth: 2,
+          pointBackgroundColor: (context) => {
+            return context.dataIndex < historicalDates.length 
+              ? 'rgba(16, 185, 129, 0.8)' 
+              : 'rgba(239, 68, 68, 0.8)';
+          },
+          pointRadius: (context) => {
+            return context.dataIndex < historicalDates.length ? 3 : 5;
+          }
+        }
+      ]
+    };
+  };
+
   const tripType = watch("tripType");
+
+  // Generate hours options for time selection
+  const hoursOptions = [];
+  for (let i = 1; i <= 12; i++) {
+    hoursOptions.push(i.toString().padStart(2, '0'));
+  }
+
+  // Generate minutes options for time selection
+  const minutesOptions = [];
+  for (let i = 0; i < 60; i += 5) {
+    minutesOptions.push(i.toString().padStart(2, '0'));
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-white flex flex-col items-center justify-center p-4">
@@ -120,9 +260,9 @@ export default function FlightFarePrediction() {
       <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-4xl border border-blue-100 mb-6 transform transition-all duration-500 hover:shadow-2xl">
         <h2 className="text-3xl font-bold text-blue-600 text-center mb-2 flex items-center justify-center">
           <Plane className="mr-2 text-blue-500" size={32} strokeWidth={2} />
-          Predict Your Flight Fare
+          Flight Fare Predictor
         </h2>
-        <p className="text-gray-500 text-center">Enter your travel details to get an accurate fare prediction</p>
+        <p className="text-gray-500 text-center">Get accurate fare predictions and price trends for your journey</p>
       </div>
 
       {/* Main Content */}
@@ -160,13 +300,16 @@ export default function FlightFarePrediction() {
                 <MapPin className="mr-2 text-blue-500" size={18} />
                 From
               </label>
-              <div className="relative">
-                <AirportAutocomplete
-                  onSelect={(airport) => setValue("source_city", airport.city)}
-                  value={watch("source_city")}
-                  className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300"
-                />
-              </div>
+              <select
+                {...register("source_city", { required: true })}
+                className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer transition-all duration-300"
+              >
+                {ALL_CITIES.map((city) => (
+                  <option key={`source-${city}`} value={city}>
+                    {city}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-2">
@@ -174,13 +317,16 @@ export default function FlightFarePrediction() {
                 <MapPin className="mr-2 text-blue-500" size={18} />
                 To
               </label>
-              <div className="relative">
-                <AirportAutocomplete
-                  onSelect={(airport) => setValue("destination_city", airport.city)}
-                  value={watch("destination_city")}
-                  className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300"
-                />
-              </div>
+              <select
+                {...register("destination_city", { required: true })}
+                className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer transition-all duration-300"
+              >
+                {ALL_CITIES.map((city) => (
+                  <option key={`dest-${city}`} value={city}>
+                    {city}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -196,13 +342,14 @@ export default function FlightFarePrediction() {
                 onChange={(date) => setValue("departureDate", date)}
                 className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300"
                 placeholderText="Select date"
+                minDate={new Date()}
               />
             </div>
 
             <div className="space-y-2">
               <label className="block font-medium text-gray-700 flex items-center">
                 <Plane className="mr-2 text-blue-500" size={18} />
-                Airline <span className="text-red-500">*</span>
+                Airline
               </label>
               <select
                 {...register("airline", { required: true })}
@@ -215,24 +362,87 @@ export default function FlightFarePrediction() {
                 ))}
               </select>
             </div>
-
-            {tripType === "roundTrip" && (
-              <div className="space-y-2">
-                <label className="block font-medium text-gray-700 flex items-center">
-                  <Calendar className="mr-2 text-blue-500" size={18} />
-                  Return Date
-                </label>
-                <DatePicker
-                  selected={watch("returnDate")}
-                  onChange={(date) => setValue("returnDate", date)}
-                  className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300"
-                  placeholderText="Select date"
-                />
-              </div>
-            )}
           </div>
 
-          {/* Class, Passengers, Duration, Stops */}
+          {/* Departure Time */}
+          <div className="space-y-2">
+            <label className="block font-medium text-gray-700 flex items-center">
+              <Clock className="mr-2 text-blue-500" size={18} />
+              Departure Time
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <select
+                {...register("departureHour")}
+                className="bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer transition-all duration-300"
+              >
+                {hoursOptions.map((hour) => (
+                  <option key={`dep-hour-${hour}`} value={hour}>{hour}</option>
+                ))}
+              </select>
+              <select
+                {...register("departureMinute")}
+                className="bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer transition-all duration-300"
+              >
+                {minutesOptions.map((minute) => (
+                  <option key={`dep-min-${minute}`} value={minute}>{minute}</option>
+                ))}
+              </select>
+              <select
+                {...register("departureAmPm")}
+                className="bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer transition-all duration-300"
+              >
+                <option value="AM">AM</option>
+                <option value="PM">PM</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Duration */}
+          <div className="space-y-2">
+            <label className="block font-medium text-gray-700 flex items-center">
+              <Clock className="mr-2 text-blue-500" size={18} />
+              Duration (hours)
+            </label>
+            <input
+              type="number"
+              step="0.5"
+              min="0.5"
+              max="24"
+              {...register("duration")}
+              className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300"
+              placeholder="Flight duration"
+            />
+          </div>
+
+          {/* Arrival Time (Calculated) */}
+          <div className="space-y-2">
+            <label className="block font-medium text-gray-700 flex items-center">
+              <Clock className="mr-2 text-blue-500" size={18} />
+              Arrival Time (Calculated)
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                type="text"
+                readOnly
+                value={watch("arrivalHour")}
+                className="bg-gray-100 border border-blue-200 rounded-lg p-3 focus:outline-none transition-all duration-300"
+              />
+              <input
+                type="text"
+                readOnly
+                value={watch("arrivalMinute")}
+                className="bg-gray-100 border border-blue-200 rounded-lg p-3 focus:outline-none transition-all duration-300"
+              />
+              <input
+                type="text"
+                readOnly
+                value={watch("arrivalAmPm")}
+                className="bg-gray-100 border border-blue-200 rounded-lg p-3 focus:outline-none transition-all duration-300"
+              />
+            </div>
+          </div>
+
+          {/* Class and Stops */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <label className="block font-medium text-gray-700">Class</label>
@@ -241,41 +451,9 @@ export default function FlightFarePrediction() {
                 className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer transition-all duration-300"
               >
                 {ALL_CLASSES.map((cls) => (
-                  <option key={cls} value={cls}>
-                    {cls.replace('_', ' ')}
-                  </option>
+                  <option key={cls} value={cls}>{cls}</option>
                 ))}
               </select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block font-medium text-gray-700 flex items-center">
-                <Users className="mr-2 text-blue-500" size={18} />
-                Passengers
-              </label>
-              <div className="relative">
-                <input
-                  type="number"
-                  min="1"
-                  max="9"
-                  {...register("passengers")}
-                  className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 pl-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block font-medium text-gray-700 flex items-center">
-                <Clock className="mr-2 text-blue-500" size={18} />
-                Duration (hours)
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                {...register("duration")}
-                className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300"
-                placeholder="Flight duration"
-              />
             </div>
 
             <div className="space-y-2">
@@ -287,43 +465,6 @@ export default function FlightFarePrediction() {
                 <option value="0">Non-stop</option>
                 <option value="1">1 Stop</option>
                 <option value="2+">2+ Stops</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Departure/Arrival Time */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="block font-medium text-gray-700 flex items-center">
-                <Clock className="mr-2 text-blue-500" size={18} />
-                Departure Time
-              </label>
-              <select 
-                {...register("departureTime")} 
-                className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer transition-all duration-300"
-              >
-                {Object.keys(TIME_MAPPING).map((label) => (
-                  <option key={label} value={label}>
-                    {label.replace(/_/g, ' ')} ({TIME_MAPPING[label]}:00)
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block font-medium text-gray-700 flex items-center">
-                <Clock className="mr-2 text-blue-500" size={18} />
-                Arrival Time
-              </label>
-              <select 
-                {...register("arrivalTime")} 
-                className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer transition-all duration-300"
-              >
-                {Object.keys(TIME_MAPPING).map((label) => (
-                  <option key={label} value={label}>
-                    {label.replace(/_/g, ' ')} ({TIME_MAPPING[label]}:00)
-                  </option>
-                ))}
               </select>
             </div>
           </div>
@@ -345,8 +486,8 @@ export default function FlightFarePrediction() {
                 </span>
               ) : (
                 <span className="flex items-center">
-                  Predict Fare
-                  <Plane className="ml-2" size={20} />
+                  Predict Fare & Trends
+                  <TrendingUp className="ml-2" size={20} />
                 </span>
               )}
             </button>
@@ -363,41 +504,113 @@ export default function FlightFarePrediction() {
         {/* Result Section */}
         {result && (
           <div className="mt-8 pt-6 border-t border-blue-100">
-            <h3 className="text-lg font-medium mb-4 text-blue-700">Predicted Fare</h3>
+            <h3 className="text-lg font-medium mb-4 text-blue-700">Flight Details</h3>
             <div className="bg-blue-50 p-6 rounded-lg border border-blue-200 shadow-inner">
               {/* Route Summary */}
               <div className="mb-4 p-4 bg-white rounded-lg">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center">
                     <MapPin className="text-blue-500 mr-2" size={18} />
-                    <span className="font-medium">{watch("source_city")}</span>
+                    <span className="font-medium">{result.route.split(' to ')[0]}</span>
                   </div>
                   <Plane className="text-blue-500 mx-2" size={20} />
                   <div className="flex items-center">
-                    <span className="font-medium">{watch("destination_city")}</span>
+                    <span className="font-medium">{result.route.split(' to ')[1]}</span>
                     <MapPin className="text-blue-500 ml-2" size={18} />
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-sm text-gray-600">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm text-gray-600">
                   <div className="flex items-center">
                     <Calendar className="text-blue-500 mr-1" size={14} />
-                    <span>{watch("departureDate")?.toLocaleDateString()}</span>
+                    <span>{result.date}</span>
                   </div>
                   <div className="flex items-center">
                     <Clock className="text-blue-500 mr-1" size={14} />
-                    <span>{watch("duration")} hrs</span>
+                    <span>{result.time}</span>
                   </div>
                   <div className="flex items-center">
                     <Plane className="text-blue-500 mr-1" size={14} />
-                    <span>{watch("airline").replace(/_/g, ' ')}</span>
+                    <span>{result.airline}</span>
+                  </div>
+                  <div className="flex items-center">
+                    <span className="text-blue-500 mr-1">⏱️</span>
+                    <span>{result.duration} hours</span>
+                  </div>
+                  <div className="flex items-center">
+                    <span className="text-blue-500 mr-1">🪑</span>
+                    <span>{result.class}</span>
+                  </div>
+                  <div className="flex items-center">
+                    <span className="text-blue-500 mr-1">✈️</span>
+                    <span>{result.stops}</span>
                   </div>
                 </div>
               </div>
+              
               {/* Price Display */}
-              <div className="flex justify-between items-center">
-                <span className="text-blue-700">Estimated price:</span>
-                <span className="text-3xl font-bold text-blue-700">{result}</span>
+              <div className="flex justify-between items-center mb-6">
+                <span className="text-blue-700 font-medium">Predicted price:</span>
+                <span className="text-3xl font-bold text-blue-700">
+                  {result.currency}{result.price.toLocaleString()}
+                </span>
               </div>
+
+              {/* Price Trend Chart */}
+              {isTrendLoading ? (
+                <div className="h-64 flex items-center justify-center">
+                  <div className="animate-pulse text-blue-500">Loading price trends...</div>
+                </div>
+              ) : trendData && prepareChartData() ? (
+                <div className="mt-6">
+                  <h4 className="text-lg font-medium mb-3 text-blue-700 flex items-center">
+                    <TrendingUp className="mr-2" size={20} />
+                    Price Trend Analysis
+                  </h4>
+                  <div className="bg-white p-4 rounded-lg border border-blue-200">
+                    <div className="h-64">
+                      <Line 
+                        data={prepareChartData()} 
+                        options={{
+                          responsive: true,
+                          maintainAspectRatio: false,
+                          scales: {
+                            y: {
+                              beginAtZero: false,
+                              ticks: {
+                                callback: (value) => `₹${value}`
+                              }
+                            }
+                          },
+                          plugins: {
+                            tooltip: {
+                              callbacks: {
+                                label: (context) => `Price: ₹${context.raw.toLocaleString()}`
+                              }
+                            },
+                            legend: {
+                              display: false
+                            }
+                          }
+                        }} 
+                      />
+                    </div>
+                    <div className="mt-4 flex justify-center space-x-4">
+                      <div className="flex items-center">
+                        <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
+                        <span className="text-sm">Historical Prices</span>
+                      </div>
+                      <div className="flex items-center">
+                        <div className="w-3 h-3 bg-red-500 rounded-full mr-2"></div>
+                        <span className="text-sm">Future Prediction</span>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500 text-center">
+                      * Future prices are predictions based on historical trends
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+              
               <p className="mt-3 text-xs text-blue-500">
                 * Prices may vary based on availability and other factors
               </p>
@@ -406,10 +619,11 @@ export default function FlightFarePrediction() {
         )}
       </div>
       
-      {/* Footer with shadow */}
+      {/* Footer */}
       <div className="w-full max-w-4xl mt-6 px-4 py-3 text-center text-blue-500 text-sm">
         © {new Date().getFullYear()} Flight Fare Predictor | Get accurate estimates for your journey
       </div>
     </div>
   );
 }
+

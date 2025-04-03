@@ -4,6 +4,8 @@ import pandas as pd
 import joblib
 import logging
 import os
+from datetime import datetime, timedelta
+import random
 
 app = Flask(__name__)
 CORS(app)
@@ -55,12 +57,9 @@ def validate_input(data: dict) -> None:
     }
     
     for category, prefix in categories.items():
-        # Find any keys that start with the prefix
         matching_keys = [k for k in data.keys() if k.startswith(prefix)]
         if not matching_keys:
             raise ValueError(f"No {category} features found. At least one {category} feature must be set.")
-        
-        # Check if at least one value is 1
         if not any(data.get(key) == 1 for key in matching_keys):
             raise ValueError(f"Exactly one {category} must be selected (set to 1)")
 
@@ -78,10 +77,42 @@ def preprocess_input(data: dict) -> pd.DataFrame:
         if feature in data:
             features[feature] = int(data[feature])
 
-    # Log the final feature vector for debugging
     logger.info("Final feature vector: %s", features)
-    
     return pd.DataFrame([features], columns=FEATURE_ORDER)
+
+def generate_historical_data(base_price, days=30):
+    """Generate mock historical price data"""
+    today = datetime.now()
+    history = []
+    
+    for i in range(days, 0, -1):
+        date = today - timedelta(days=i)
+        fluctuation = random.uniform(-0.15, 0.15) * base_price
+        price = max(base_price + fluctuation, base_price * 0.7)
+        history.append({
+            'date': date.strftime('%Y-%m-%d'),
+            'price': round(float(price), 2)
+        })
+    
+    return history
+
+def predict_future_prices(data: dict, days_ahead: int = 10) -> list:
+    """Predict prices for future dates using the model (adjusting days_left)."""
+    forecast = []
+    original_days_left = data['days_left']
+    
+    for day in range(1, days_ahead + 1):
+        # Update days_left for prediction
+        data['days_left'] = original_days_left - day
+        processed_data = preprocess_input(data)
+        predicted_price = float(model.predict(processed_data)[0])
+        
+        forecast.append({
+            'date': (datetime.now() + timedelta(days=day)).strftime('%Y-%m-%d'),
+            'price': round(predicted_price, 2)
+        })
+    
+    return forecast
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -89,13 +120,8 @@ def predict():
         data = request.json
         logger.info(f"Received prediction request with data: {data}")
         
-        # Log the incoming data for debugging
-        for key, value in data.items():
-            logger.info(f"Request data - {key}: {value}")
-        
         validate_input(data)
         processed_data = preprocess_input(data)
-        
         prediction = model.predict(processed_data)
         logger.info(f"Predicted price: {prediction[0]}")
         
@@ -110,6 +136,36 @@ def predict():
         return jsonify({'error': str(e), 'status': 'error'}), 400
     except Exception as e:
         logger.error(f"Prediction failed: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e), 'status': 'error'}), 500
+
+@app.route('/predict_trend', methods=['POST'])
+def predict_trend():
+    try:
+        data = request.json
+        logger.info(f"Received trend prediction request with data: {data}")
+        
+        # Get base price for historical data (optional)
+        validate_input(data)
+        processed_data = preprocess_input(data)
+        base_price = float(model.predict(processed_data)[0])
+        
+        # Generate historical data (mock)
+        historical_data = generate_historical_data(base_price)
+        
+        # Predict future prices using the model (key fix)
+        forecast = predict_future_prices(data, days_ahead=10)
+        
+        return jsonify({
+            'historical': historical_data,
+            'forecast': forecast,
+            'status': 'success'
+        })
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
+        return jsonify({'error': str(e), 'status': 'error'}), 400
+    except Exception as e:
+        logger.error(f"Trend prediction failed: {str(e)}", exc_info=True)
         return jsonify({'error': str(e), 'status': 'error'}), 500
 
 if __name__ == '__main__':
