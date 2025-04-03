@@ -97,22 +97,32 @@ def generate_historical_data(base_price, days=30):
     return history
 
 def predict_future_prices(data: dict, days_ahead: int = 10) -> list:
-    """Predict prices for future dates using the model (adjusting days_left)."""
+    """Predict prices for future dates using the model, ensuring correct days_left adjustment."""
     forecast = []
-    original_days_left = data['days_left']
     
+    # Get the user-selected departure date
+    departure_date = datetime.strptime(data.get('departure_date', datetime.now().strftime('%Y-%m-%d')), '%Y-%m-%d')
+    today = datetime.now()
+
+    # Ensure days_left is calculated from departure_date
+    base_days_left = (departure_date - today).days
+    data['days_left'] = base_days_left
+
     for day in range(1, days_ahead + 1):
-        # Update days_left for prediction
-        data['days_left'] = original_days_left - day
+        future_date = departure_date + timedelta(days=day)
+        data['days_left'] = (future_date - today).days  # Correct days_left adjustment
+        
         processed_data = preprocess_input(data)
         predicted_price = float(model.predict(processed_data)[0])
         
         forecast.append({
-            'date': (datetime.now() + timedelta(days=day)).strftime('%Y-%m-%d'),
+            'date': future_date.strftime('%Y-%m-%d'),
             'price': round(predicted_price, 2)
         })
-    
+
     return forecast
+
+
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -143,30 +153,46 @@ def predict_trend():
     try:
         data = request.json
         logger.info(f"Received trend prediction request with data: {data}")
-        
-        # Get base price for historical data (optional)
+
+        # Validate and preprocess input
         validate_input(data)
         processed_data = preprocess_input(data)
+        
+        # Use the same model prediction as /predict
         base_price = float(model.predict(processed_data)[0])
-        
-        # Generate historical data (mock)
-        historical_data = generate_historical_data(base_price)
-        
-        # Predict future prices using the model (key fix)
+
+        # Generate past 30 days of real predictions instead of mock data
+        historical_data = []
+        today = datetime.now()
+
+        for i in range(30, 0, -1):
+            past_date = today - timedelta(days=i)
+            data['days_left'] = (past_date - today).days  # Adjust days_left for history
+            
+            processed_data = preprocess_input(data)
+            past_price = float(model.predict(processed_data)[0])
+
+            historical_data.append({
+                'date': past_date.strftime('%Y-%m-%d'),
+                'price': round(past_price, 2)
+            })
+
+        # Predict future prices using the fixed function
         forecast = predict_future_prices(data, days_ahead=10)
-        
+
         return jsonify({
             'historical': historical_data,
             'forecast': forecast,
             'status': 'success'
         })
-        
+
     except ValueError as e:
         logger.error(f"Validation error: {str(e)}")
         return jsonify({'error': str(e), 'status': 'error'}), 400
     except Exception as e:
         logger.error(f"Trend prediction failed: {str(e)}", exc_info=True)
         return jsonify({'error': str(e), 'status': 'error'}), 500
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

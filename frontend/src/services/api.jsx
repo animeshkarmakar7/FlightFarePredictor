@@ -20,7 +20,6 @@ const CITY_MAPPING = {
   "CHENNAI INTERNATIONAL": "Chennai"
 };
 
-// Define the constants that were missing
 const AIRLINES = ["AirAsia", "Air_India", "GO_FIRST", "Indigo", "SpiceJet", "Vistara"];
 const CITIES = ['Bangalore', 'Chennai', 'Delhi', 'Hyderabad', 'Kolkata', 'Mumbai'];
 const CLASSES = ['Business', 'Economy'];
@@ -32,21 +31,20 @@ const STOPS_MAPPING = {
   "2+": "two_or_more"
 };
 
-// Helper function to build the payload
+// ✅ Updated function to correctly calculate days_left and send departure_date
 const buildPayload = (formData) => {
-  // Validate departure date
   const departureDate = new Date(formData.departureDate);
   if (isNaN(departureDate)) {
     throw new Error("Invalid departure date");
   }
 
-  // Calculate days_left correctly
-  const daysLeft = Math.ceil(
-    (departureDate - new Date()) / (1000 * 60 * 60 * 24)
-  );
+  // Corrected: Ensure days_left is at least 0 (not 1)
+  const today = new Date();
+  const daysLeft = Math.max(Math.ceil((departureDate - today) / (1000 * 60 * 60 * 24)), 0);
 
   const payload = {
-    days_left: Math.max(daysLeft, 1),
+    departure_date: departureDate.toISOString().split('T')[0], // ✅ Sending correct format
+    days_left: daysLeft,
     duration: parseFloat(formData.duration) || 0,
     departure_time: TIME_MAPPING[formData.departureTime],
     arrival_time: TIME_MAPPING[formData.arrivalTime],
@@ -68,8 +66,7 @@ const buildPayload = (formData) => {
 
   // Class encoding
   CLASSES.forEach(cls => {
-    const key = `class_${cls.replace(' ', '_')}`;
-    payload[key] = formData.travelClass === cls ? 1 : 0;
+    payload[`class_${cls.replace(' ', '_')}`] = formData.travelClass === cls ? 1 : 0;
   });
 
   // Stops encoding
@@ -85,7 +82,6 @@ export const predictFlightFare = async (formData) => {
   try {
     console.log("Received formData:", formData);
     
-    // Validate all required fields are present
     if (!formData.departureTime || TIME_MAPPING[formData.departureTime] === undefined) {
       throw new Error("Missing required field: departure_time");
     }
@@ -101,12 +97,11 @@ export const predictFlightFare = async (formData) => {
   }
 };
 
-// NEW FUNCTION: For trend prediction
+// ✅ Updated: Ensure trend prediction gets departure_date correctly
 export const predictFlightTrend = async (formData) => {
   try {
     console.log("Received formData for trend prediction:", formData);
     
-    // Validate all required fields are present
     if (!formData.departureTime || TIME_MAPPING[formData.departureTime] === undefined) {
       throw new Error("Missing required field: departure_time");
     }
