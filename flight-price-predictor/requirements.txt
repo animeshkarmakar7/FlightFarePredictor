@@ -6,3 +6,6 @@ xgboost
 matplotlib
 jupyter
 python-dotenv
+flask
+flask-cors
+joblib

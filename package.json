@@ -1,0 +1,22 @@
+{
+  "name": "pyattendence",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start" : "",
+    "build" : ""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/animeshkarmakar7/FlightFarePredictor.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/animeshkarmakar7/FlightFarePredictor/issues"
+  },
+  "homepage": "https://github.com/animeshkarmakar7/FlightFarePredictor#readme"
+}

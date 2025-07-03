@@ -1,25 +1,3 @@
-// // src/App.jsx
-// import React from 'react';
-// import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
-// import FlightFarePrediction from './components/flightPriceUi/FlightFarePrediction';
-// import "tailwindcss";
-
-// function App() {
-//   return (
-//     <BrowserRouter>
-
-   
-// <FlightFarePrediction/>
-      
-  
-//     </BrowserRouter>
-//   );
-// }
-
-// // Reusable NavLink component
-
-
-// export default App;
 
 
 import React from 'react';

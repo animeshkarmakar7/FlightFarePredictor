@@ -13,7 +13,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load model - using more robust path handling
-MODEL_PATH = 'D:\\PyAttendence\\flight-price-predictor\\models\\xgboost_model.pkl'
+MODEL_PATH = os.path.join(os.path.dirname(__file__), 'models', 'xgboost_model.pkl')
+
 try:
     if os.path.exists(MODEL_PATH):
         model = joblib.load(MODEL_PATH)
@@ -80,21 +81,23 @@ def preprocess_input(data: dict) -> pd.DataFrame:
     logger.info("Final feature vector: %s", features)
     return pd.DataFrame([features], columns=FEATURE_ORDER)
 
-def generate_historical_data(base_price, days=30):
-    """Generate mock historical price data"""
-    today = datetime.now()
+def generate_historical_data(base_price, departure_date, days=30):
     history = []
-    
+
     for i in range(days, 0, -1):
-        date = today - timedelta(days=i)
-        fluctuation = random.uniform(-0.15, 0.15) * base_price
-        price = max(base_price + fluctuation, base_price * 0.7)
+        historical_date = departure_date - timedelta(days=i)
+
+        # Fluctuation: ±1500 randomly around base_price
+        fluctuation = random.randint(-1500, 1500)
+        historical_price = base_price + fluctuation
+
         history.append({
-            'date': date.strftime('%Y-%m-%d'),
-            'price': round(float(price), 2)
+            'date': historical_date.strftime('%Y-%m-%d'),
+            'price': round(historical_price, 2)
         })
-    
+
     return history
+
 
 def predict_future_prices(data: dict, days_ahead: int = 10) -> list:
     """Predict prices for future dates using the model, ensuring correct days_left adjustment."""
@@ -169,12 +172,12 @@ def predict_trend():
             past_date = today - timedelta(days=i)
             data['days_left'] = (past_date - today).days  # Adjust days_left for history
             
-            processed_data = preprocess_input(data)
-            past_price = float(model.predict(processed_data)[0])
+            fluctuation = random.randint(-1500, 1500)
+            fluctuated_price = base_price + fluctuation
 
             historical_data.append({
                 'date': past_date.strftime('%Y-%m-%d'),
-                'price': round(past_price, 2)
+                'price': round(fluctuated_price, 2)
             })
 
         # Predict future prices using the fixed function
@@ -195,4 +198,5 @@ def predict_trend():
 
 
 if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=5000, debug=True)
