@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://flightfarepredictor-5osz.onrender.com';
 
 const TIME_MAPPING = {
   'Early_Morning': 0,
