@@ -4,7 +4,7 @@
 
 This project leverages **Flask (Python)** for the backend ML model and **React** for the frontend UI, giving users an intuitive and fast way to estimate flight prices using historical trends.
 
-🌐 **Live Demo**: [SkyWay](https://your-flight-predictor-app.com)
+🌐 **Live Demo**: [SkyWay](https://flight-fare-predictor-rho.vercel.app/)
 
 ---
 
