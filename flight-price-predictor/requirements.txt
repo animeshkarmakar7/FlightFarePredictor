@@ -9,3 +9,4 @@ python-dotenv
 flask
 flask-cors
 joblib
+gunicorn
